@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>剛体の速度と加速度</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .input-group {
+            margin-bottom: 10px;
+        }
+        .result {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>剛体の速度と加速度</h1>
+    <div class="input-group">
+        <label for="Vp">Vp:</label>
+        <input type="number" id="Vp" step="any">
+    </div>
+    <div class="input-group">
+        <label for="omega">ω :</label>
+        <input type="number" id="omega" step="any">
+    </div>
+    <div class="input-group">
+        <label for="alpha">α :</label>
+        <input type="number" id="alpha" step="any">
+    </div>
+    <div class="input-group">
+        <label for="r">r:</label>
+        <input type="number" id="r" step="any">
+    </div>
+    <div class="input-group">
+        <label for="theta">θ :</label>
+        <input type="number" id="theta" step="any">
+    </div>
+    <button onclick="calculate()">計算する</button>
+    <div class="result" id="result"></div>
+
+    <script>
+        function calculate() {
+            const Vp = parseFloat(document.getElementById('Vp').value);
+            const omega = parseFloat(document.getElementById('omega').value);
+            const alpha = parseFloat(document.getElementById('alpha').value);
+            const r = parseFloat(document.getElementById('r').value);
+            const theta = parseFloat(document.getElementById('theta').value);
+
+            const radTheta = theta * Math.PI / 180;
+
+            const result1 = r * omega;
+            const result2 = Math.pow(r * omega - Vp * Math.sin(radTheta), 2) + Math.pow(Vp * Math.cos(radTheta), 2);
+            const result3 = Math.sqrt(result2);
+            const result4 = r * Math.pow(omega, 2);
+            const result5 = r * alpha;
+            const result6 = Math.sqrt(Math.pow(result4, 2) + Math.pow(result5, 2));
+
+            document.getElementById('result').innerHTML = `
+                <p>1= ${result1.toPrecision(2)}</p>
+                <p>2= ${result2.toPrecision(3)}</p>
+                <p>3= ${result3.toPrecision(3)}</p>
+                <p>4= ${result4.toPrecision(3)}</p>
+                <p>5= ${result5.toPrecision(3)}</p>
+                <p>6= ${result6.toPrecision(3)}</p>
+            `;
+        }
+    </script>
+</body>
+</html>
