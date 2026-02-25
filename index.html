@@ -158,7 +158,7 @@
         const clothMaterial = new THREE.MeshStandardMaterial({ color: 0x187a43, roughness: 0.9 });
         const woodMaterial = new THREE.MeshStandardMaterial({ color: 0x4a2a18, roughness: 0.7 });
         const metalMaterial = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.8, roughness: 0.3 });
-        // const blackMaterial = new THREE.MeshBasicMaterial({ color: 0x050505 }); // 不要になったためコメントアウト
+        const pocketCupMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.95, metalness: 0.0 });
         const markingMaterial = new THREE.MeshBasicMaterial({ color: 0x111111, side: THREE.DoubleSide });
         const ballMaterialRed = new THREE.MeshPhongMaterial({ color: 0xe74c3c, shininess: 150 });
         const ballMaterialWhite = new THREE.MeshPhongMaterial({ color: 0xfffdd0, shininess: 150 });
@@ -226,15 +226,7 @@
         const footLine = new THREE.Line(footLineGeo, new THREE.LineBasicMaterial({ color: 0x111111, linewidth: 1 }));
         tableGroup.add(footLine);
 
-        // ▼ 削除: 黒いパーツ(カップ)の生成コードを削除 ▼
-        /*
-        const dropGeo = new THREE.CylinderGeometry(POCKET_R, POCKET_R*0.7, 100, 32);
-        pocketPositions.forEach(pos => {
-            const drop = new THREE.Mesh(dropGeo, blackMaterial);
-            drop.position.set(pos[0], -52, pos[1]); 
-            tableGroup.add(drop);
-        });
-        */
+
 
         const outX = PLAY_W/2 + RAIL_W;
         const outZ = PLAY_D/2 + RAIL_W;
@@ -328,24 +320,24 @@
         createRailSection(RAIL_W, sideRailD, PLAY_W/2 + RAIL_W/2, -sideZOffset);
         createRailSection(RAIL_W, sideRailD, PLAY_W/2 + RAIL_W/2, sideZOffset);
 
-        const ringShape = new THREE.Shape();
-        ringShape.absarc(0, 0, POCKET_R * 1.2, 0, Math.PI * 2, false); 
-        const ringHole = new THREE.Path();
-        ringHole.absarc(0, 0, POCKET_R, 0, Math.PI * 2, true);         
-        ringShape.holes.push(ringHole);
-
-        const cornerGeo = new THREE.ExtrudeGeometry(ringShape, { 
-            depth: 4, 
-            bevelEnabled: true, 
-            bevelThickness: 1, 
-            bevelSize: 1, 
-            bevelSegments: 2 
-        });
-        cornerGeo.rotateX(Math.PI / 2);
+        const dropGeo = new THREE.CylinderGeometry(POCKET_R, POCKET_R * 0.7, 100, 32);
 
         pocketPositions.forEach((pos) => {
-            const metal = new THREE.Mesh(cornerGeo, metalMaterial);
-            metal.position.set(pos[0], RAIL_H + 5, pos[1]);
+            const px = pos[0];
+            const pz = pos[1];
+
+            const cup = new THREE.Mesh(dropGeo, pocketCupMat);
+            cup.position.set(px, -52, pz);
+            cup.castShadow = true;
+            cup.receiveShadow = true;
+            tableGroup.add(cup);
+
+            const outAngle = Math.atan2(pz, px);
+            const halfRingGeo = new THREE.RingGeometry(POCKET_R, POCKET_R * 1.2, 32, 1, outAngle - Math.PI / 2, Math.PI);
+            halfRingGeo.rotateX(Math.PI / 2);
+
+            const metal = new THREE.Mesh(halfRingGeo, metalMaterial);
+            metal.position.set(px, RAIL_H + 0.5, pz);
             tableGroup.add(metal);
         });
 
