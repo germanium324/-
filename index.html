@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D ビリヤード厚みシミュレーター Ultimate</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            overflow: hidden;
+            background-color: #e0e0e0;
+            color: #ffffff;
+            touch-action: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none; 
+        }
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            background-color: rgba(30, 30, 45, 0.85);
+            padding: 15px 25px;
+            border-radius: 30px; 
+            width: 80%;
+            max-width: 300px;
+            box-sizing: border-box;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,0.15);
+            display: flex;
+            align-items: center;
+        }
+        input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+            accent-color: #f1c40f;
+            margin: 0;
+            display: block;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 18px;
+            color: #333;
+            font-weight: bold;
+            z-index: 5;
+        }
+        .grabbing {
+            cursor: grabbing !important;
+        }
+        #sub-view-border {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 30vw; 
+            height: 30vw; 
+            max-width: 200px;
+            max-height: 200px;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+            pointer-events: none; 
+            z-index: 5;
+            box-sizing: border-box;
+            border-radius: 4px;
+        }
+    </style>
+    
+    <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="loading">リアルなビリヤード台を構築中...</div>
+
+    <div id="ui-container">
+        <input type="range" id="angleSlider" min="-85" max="85" step="0.5" value="0">
+    </div>
+
+    <div id="sub-view-border"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { DragControls } from 'three/addons/controls/DragControls.js';
+
+        const angleSlider = document.getElementById('angleSlider');
+        const loading = document.getElementById('loading');
+
+        // 定数
+        const D = 57.15;
+        const R = D / 2;
+        const PLAY_W = 1270; 
+        const PLAY_D = 2540; 
+        const POCKET_R = 65; 
+        const RAIL_W = 120;   
+        const RAIL_H = 45;
+        const CUSHION_H = 40; 
+        const NOSE_H = 36;    
+        const NOSE_W = 45;
+        // ▼ 追加: 木枠の穴を少し広げるための半径 ▼
+        const FRAME_HOLE_R = POCKET_R + 8;
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xe0e0e0);
+
+        const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 10, 10000);
+        camera.position.set(0, 1500, 2000);
+
+        const subCamera = new THREE.PerspectiveCamera(15, 1, 10, 5000); 
+        scene.add(subCamera); 
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.autoClear = false;
+        document.body.appendChild(renderer.domElement);
+
+        loading.style.display = 'none';
+
+        const orbitControls = new OrbitControls(camera, renderer.domElement);
+        orbitControls.target.set(0, R, 0);
+        orbitControls.enableDamping = true;
+        orbitControls.dampingFactor = 0.05;
+        orbitControls.maxPolarAngle = Math.PI / 2 - 0.05; 
+        orbitControls.update();
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        
+        const mainLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        mainLight.position.set(500, 1500, 500);
+        mainLight.castShadow = true;
+        mainLight.shadow.camera.top = 2000;
+        mainLight.shadow.camera.bottom = -2000;
+        mainLight.shadow.camera.left = -2000;
+        mainLight.shadow.camera.right = 2000;
+        mainLight.shadow.mapSize.width = 2048;
+        mainLight.shadow.mapSize.height = 2048;
+        scene.add(mainLight);
+
+        const clothMaterial = new THREE.MeshStandardMaterial({ color: 0x187a43, roughness: 0.9 });
+        const woodMaterial = new THREE.MeshStandardMaterial({ color: 0x4a2a18, roughness: 0.7 });
+        const metalMaterial = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.8, roughness: 0.3 });
+        // const blackMaterial = new THREE.MeshBasicMaterial({ color: 0x050505 }); // 不要になったためコメントアウト
+        const markingMaterial = new THREE.MeshBasicMaterial({ color: 0x111111, side: THREE.DoubleSide });
+        const ballMaterialRed = new THREE.MeshPhongMaterial({ color: 0xe74c3c, shininess: 150 });
+        const ballMaterialWhite = new THREE.MeshPhongMaterial({ color: 0xfffdd0, shininess: 150 });
+        const ballMaterialGhost = new THREE.MeshPhongMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, shininess: 50 });
+
+        const tableGroup = new THREE.Group();
+        scene.add(tableGroup);
+
+        const bedShape = new THREE.Shape();
+        bedShape.moveTo(-PLAY_W/2, -PLAY_D/2);
+        bedShape.lineTo(PLAY_W/2, -PLAY_D/2);
+        bedShape.lineTo(PLAY_W/2, PLAY_D/2);
+        bedShape.lineTo(-PLAY_W/2, PLAY_D/2);
+        bedShape.lineTo(-PLAY_W/2, -PLAY_D/2);
+
+        const pocketPositions = [
+            [-PLAY_W/2, -PLAY_D/2], [PLAY_W/2, -PLAY_D/2],
+            [-PLAY_W/2, 0],         [PLAY_W/2, 0],
+            [-PLAY_W/2, PLAY_D/2],  [PLAY_W/2, PLAY_D/2]
+        ];
+
+        pocketPositions.forEach(pos => {
+            const hole = new THREE.Path();
+            hole.absarc(pos[0], pos[1], POCKET_R, 0, Math.PI * 2, false);
+            bedShape.holes.push(hole);
+        });
+
+        const bedGeometry = new THREE.ShapeGeometry(bedShape);
+        const bedMesh = new THREE.Mesh(bedGeometry, clothMaterial);
+        bedMesh.rotation.x = -Math.PI / 2;
+        bedMesh.receiveShadow = true;
+        tableGroup.add(bedMesh);
+
+        const spotRadius = 6;
+        const spotGeo = new THREE.CircleGeometry(spotRadius, 32);
+        const markY = 0.5;
+        const quarterZ = PLAY_D / 4;
+
+        const centerSpot = new THREE.Mesh(spotGeo, markingMaterial);
+        centerSpot.rotation.x = -Math.PI / 2;
+        centerSpot.position.set(0, markY, 0);
+        tableGroup.add(centerSpot);
+
+        const headSpot = new THREE.Mesh(spotGeo, markingMaterial);
+        headSpot.rotation.x = -Math.PI / 2;
+        headSpot.position.set(0, markY, quarterZ);
+        tableGroup.add(headSpot);
+
+        const headLineGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(-PLAY_W/2, markY, quarterZ),
+            new THREE.Vector3(PLAY_W/2, markY, quarterZ)
+        ]);
+        const headLine = new THREE.Line(headLineGeo, new THREE.LineBasicMaterial({ color: 0x111111, linewidth: 1 }));
+        tableGroup.add(headLine);
+
+        const footSpot = new THREE.Mesh(spotGeo, markingMaterial);
+        footSpot.rotation.x = -Math.PI / 2;
+        footSpot.position.set(0, markY, -quarterZ);
+        tableGroup.add(footSpot);
+
+        const footLineGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(-PLAY_W/2, markY, -quarterZ),
+            new THREE.Vector3(PLAY_W/2, markY, -quarterZ)
+        ]);
+        const footLine = new THREE.Line(footLineGeo, new THREE.LineBasicMaterial({ color: 0x111111, linewidth: 1 }));
+        tableGroup.add(footLine);
+
+        // ▼ 削除: 黒いパーツ(カップ)の生成コードを削除 ▼
+        /*
+        const dropGeo = new THREE.CylinderGeometry(POCKET_R, POCKET_R*0.7, 100, 32);
+        pocketPositions.forEach(pos => {
+            const drop = new THREE.Mesh(dropGeo, blackMaterial);
+            drop.position.set(pos[0], -52, pos[1]); 
+            tableGroup.add(drop);
+        });
+        */
+
+        const outX = PLAY_W/2 + RAIL_W;
+        const outZ = PLAY_D/2 + RAIL_W;
+        const inX = PLAY_W/2;
+        const inZ = PLAY_D/2;
+
+        const frameShape = new THREE.Shape();
+        frameShape.moveTo(-outX, -outZ);
+        frameShape.lineTo(outX, -outZ);
+        frameShape.lineTo(outX, outZ);
+        frameShape.lineTo(-outX, outZ);
+        frameShape.lineTo(-outX, -outZ);
+
+        // ▼ 変更: 木枠の穴の半径を広げた FRAME_HOLE_R に変更 ▼
+        const frameHole = new THREE.Path();
+        frameHole.moveTo(inX - FRAME_HOLE_R, -inZ);
+        frameHole.lineTo(-inX + FRAME_HOLE_R, -inZ);
+        frameHole.absarc(-inX, -inZ, FRAME_HOLE_R, 0, Math.PI/2, false);
+        frameHole.lineTo(-inX, -FRAME_HOLE_R);
+        frameHole.absarc(-inX, 0, FRAME_HOLE_R, -Math.PI/2, Math.PI/2, false);
+        frameHole.lineTo(-inX, inZ - FRAME_HOLE_R);
+        frameHole.absarc(-inX, inZ, FRAME_HOLE_R, -Math.PI/2, 0, false);
+        frameHole.lineTo(inX - FRAME_HOLE_R, inZ);
+        frameHole.absarc(inX, inZ, FRAME_HOLE_R, Math.PI, Math.PI * 1.5, false);
+        frameHole.lineTo(inX, FRAME_HOLE_R);
+        frameHole.absarc(inX, 0, FRAME_HOLE_R, Math.PI/2, Math.PI * 1.5, false);
+        frameHole.lineTo(inX, -inZ + FRAME_HOLE_R);
+        frameHole.absarc(inX, -inZ, FRAME_HOLE_R, Math.PI/2, Math.PI, false);
+        frameShape.holes.push(frameHole);
+
+        const frameExtrudeSettings = { depth: RAIL_H, bevelEnabled: false, curveSegments: 32 };
+        const frameGeo = new THREE.ExtrudeGeometry(frameShape, frameExtrudeSettings);
+        frameGeo.rotateX(Math.PI / 2);
+
+        const woodFrame = new THREE.Mesh(frameGeo, woodMaterial);
+        woodFrame.position.y = RAIL_H;
+        woodFrame.castShadow = true;
+        woodFrame.receiveShadow = true;
+        tableGroup.add(woodFrame);
+
+        function createRailSection(w, d, x, z) {
+            const isHorizontal = w > d;
+            const length = isHorizontal ? w : d;
+            
+            const shape = new THREE.Shape();
+            shape.moveTo(0, 0);             
+            shape.lineTo(NOSE_W, NOSE_H);   
+            shape.lineTo(0, CUSHION_H);     
+            shape.lineTo(0, 0);             
+
+            const extrudeSettings = { steps: 1, depth: length, bevelEnabled: false };
+            const cushionGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            cushionGeo.center(); 
+
+            const cushion = new THREE.Mesh(cushionGeo, clothMaterial);
+            cushion.castShadow = true;
+            cushion.position.y = CUSHION_H / 2;
+
+            if (isHorizontal) {
+                if (z < 0) {
+                    cushion.rotation.y = -Math.PI / 2;
+                    cushion.position.x = x;
+                    cushion.position.z = z + RAIL_W/2 + NOSE_W/2;
+                } else {
+                    cushion.rotation.y = Math.PI / 2;
+                    cushion.position.x = x;
+                    cushion.position.z = z - RAIL_W/2 - NOSE_W/2;
+                }
+            } else {
+                if (x < 0) {
+                    cushion.rotation.y = 0;
+                    cushion.position.x = x + RAIL_W/2 + NOSE_W/2;
+                    cushion.position.z = z;
+                } else {
+                    cushion.rotation.y = Math.PI;
+                    cushion.position.x = x - RAIL_W/2 - NOSE_W/2;
+                    cushion.position.z = z;
+                }
+            }
+            tableGroup.add(cushion);
+        }
+
+        const topRailW = PLAY_W - POCKET_R * 2.2;
+        createRailSection(topRailW, RAIL_W, 0, -PLAY_D/2 - RAIL_W/2);
+        createRailSection(topRailW, RAIL_W, 0, PLAY_D/2 + RAIL_W/2);
+
+        const sideRailD = (PLAY_D / 2) - POCKET_R * 1.5;
+        const sideZOffset = PLAY_D/4 + POCKET_R*0.2;
+        createRailSection(RAIL_W, sideRailD, -PLAY_W/2 - RAIL_W/2, -sideZOffset);
+        createRailSection(RAIL_W, sideRailD, -PLAY_W/2 - RAIL_W/2, sideZOffset);
+        createRailSection(RAIL_W, sideRailD, PLAY_W/2 + RAIL_W/2, -sideZOffset);
+        createRailSection(RAIL_W, sideRailD, PLAY_W/2 + RAIL_W/2, sideZOffset);
+
+        const ringShape = new THREE.Shape();
+        ringShape.absarc(0, 0, POCKET_R * 1.2, 0, Math.PI * 2, false); 
+        const ringHole = new THREE.Path();
+        ringHole.absarc(0, 0, POCKET_R, 0, Math.PI * 2, true);         
+        ringShape.holes.push(ringHole);
+
+        const cornerGeo = new THREE.ExtrudeGeometry(ringShape, { 
+            depth: 4, 
+            bevelEnabled: true, 
+            bevelThickness: 1, 
+            bevelSize: 1, 
+            bevelSegments: 2 
+        });
+        cornerGeo.rotateX(Math.PI / 2);
+
+        pocketPositions.forEach((pos) => {
+            const metal = new THREE.Mesh(cornerGeo, metalMaterial);
+            metal.position.set(pos[0], RAIL_H + 5, pos[1]);
+            tableGroup.add(metal);
+        });
+
+        const sphereGeo = new THREE.SphereGeometry(R, 32, 32);
+
+        const targetBall = new THREE.Mesh(sphereGeo, ballMaterialRed);
+        targetBall.position.set(0, R, -quarterZ); 
+        targetBall.castShadow = true;
+        scene.add(targetBall);
+
+        const cueBall = new THREE.Mesh(sphereGeo, ballMaterialWhite);
+        cueBall.position.set(0, R, quarterZ + 200); 
+        cueBall.castShadow = true;
+        scene.add(cueBall);
+
+        const ghostBall = new THREE.Mesh(sphereGeo, ballMaterialGhost);
+        scene.add(ghostBall);
+
+        function updateSliderLimits() {
+            const cx = cueBall.position.x;
+            const cz = cueBall.position.z;
+            const tx = targetBall.position.x;
+            const tz = targetBall.position.z;
+            
+            const dist = Math.sqrt((tx - cx)**2 + (tz - cz)**2);
+            if (dist < 0.1) return;
+
+            const ratio = Math.min(1.0, D / dist);
+            const maxCutRad = Math.acos(ratio);
+            const maxCutDeg = Math.max(0, (maxCutRad * 180 / Math.PI) - 0.1); 
+            
+            const searchLimit = Math.floor(Math.min(85, maxCutDeg) * 2) / 2;
+
+            const baseTheta = Math.atan2(tx - cx, tz - cz); 
+            const limitX = PLAY_W / 2 - NOSE_W - R;
+            const limitZ = PLAY_D / 2 - NOSE_W - R;
+
+            let validMin = 0;
+            let validMax = 0;
+            let found = false;
+
+            for (let a = -searchLimit; a <= searchLimit; a += 0.5) {
+                const flyTheta = baseTheta + a * Math.PI / 180;
+                const gx = tx - D * Math.sin(flyTheta);
+                const gz = tz - D * Math.cos(flyTheta);
+
+                const eps = 0.1;
+                if (gx >= -limitX - eps && gx <= limitX + eps && gz >= -limitZ - eps && gz <= limitZ + eps) {
+                    if (!found) {
+                        validMin = a;
+                        found = true;
+                    }
+                    validMax = a;
+                }
+            }
+
+            if (!found) {
+                validMin = 0;
+                validMax = 0;
+            }
+
+            angleSlider.min = validMin;
+            angleSlider.max = validMax;
+
+            let currentVal = parseFloat(angleSlider.value);
+            if (currentVal < validMin) angleSlider.value = validMin;
+            if (currentVal > validMax) angleSlider.value = validMax;
+        }
+
+        const dragControls = new DragControls([targetBall, cueBall], camera, renderer.domElement);
+        
+        dragControls.addEventListener('dragstart', function (event) {
+            orbitControls.enabled = false; 
+            document.body.classList.add('grabbing');
+        });
+
+        dragControls.addEventListener('drag', function (event) {
+            const obj = event.object;
+            obj.position.y = R;
+            
+            const limitX = PLAY_W / 2 - NOSE_W - R;
+            const limitZ = PLAY_D / 2 - NOSE_W - R;
+            
+            obj.position.x = Math.max(-limitX, Math.min(limitX, obj.position.x));
+            obj.position.z = Math.max(-limitZ, Math.min(limitZ, obj.position.z));
+            
+            const otherObj = (obj === cueBall) ? targetBall : cueBall;
+            let dx = obj.position.x - otherObj.position.x;
+            let dz = obj.position.z - otherObj.position.z;
+            let dist = Math.sqrt(dx*dx + dz*dz);
+            
+            if (dist < D + 0.1) {
+                if (dist < 0.001) { dx = 1; dz = 0; dist = 1; }
+                const pushDist = (D + 0.1) - dist;
+                obj.position.x += (dx / dist) * pushDist;
+                obj.position.z += (dz / dist) * pushDist;
+                
+                obj.position.x = Math.max(-limitX, Math.min(limitX, obj.position.x));
+                obj.position.z = Math.max(-limitZ, Math.min(limitZ, obj.position.z));
+            }
+            
+            updateSliderLimits();
+            updateScene(); 
+        });
+
+        dragControls.addEventListener('dragend', function (event) {
+            orbitControls.enabled = true; 
+            document.body.classList.remove('grabbing');
+        });
+
+        const lineMatCue = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 3 });
+        const lineMatTarget = new THREE.LineDashedMaterial({ color: 0xff3333, dashSize: 20, gapSize: 10, linewidth: 3 });
+        const lineMatCueDeflect = new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 20, gapSize: 10, linewidth: 3 });
+        
+        const cueLine = new THREE.Line(new THREE.BufferGeometry(), lineMatCue);
+        const targetLine = new THREE.Line(new THREE.BufferGeometry(), lineMatTarget);
+        const cueDeflectLine = new THREE.Line(new THREE.BufferGeometry(), lineMatCueDeflect);
+        
+        cueLine.position.y = 2;
+        targetLine.position.y = 2;
+        cueDeflectLine.position.y = 2;
+
+        scene.add(cueLine);
+        scene.add(targetLine);
+        scene.add(cueDeflectLine);
+
+        function updateScene() {
+            const angleDeg = parseFloat(angleSlider.value);
+            const addedTheta = angleDeg * Math.PI / 180;
+
+            const cx = cueBall.position.x;
+            const cz = cueBall.position.z;
+            const tx = targetBall.position.x;
+            const tz = targetBall.position.z;
+
+            const dx = tx - cx;
+            const dz = tz - cz;
+            const baseTheta = Math.atan2(dx, dz); 
+
+            const flyTheta = baseTheta + addedTheta;
+            const flyDirX = Math.sin(flyTheta);
+            const flyDirZ = Math.cos(flyTheta);
+
+            const gx = tx - D * flyDirX;
+            const gz = tz - D * flyDirZ;
+            ghostBall.position.set(gx, R, gz);
+
+            const dirX = gx - cx;
+            const dirZ = gz - cz;
+            const dirLen = Math.sqrt(dirX*dirX + dirZ*dirZ);
+            
+            if(dirLen > 0.1) {
+                const nx = dirX / dirLen;
+                const nz = dirZ / dirLen;
+
+                const shotDir = new THREE.Vector3(nx, 0, nz);
+                const camDist = 400; 
+                const subCamPos = new THREE.Vector3(gx, R + 25, gz).sub(shotDir.clone().multiplyScalar(camDist));
+                subCamera.position.copy(subCamPos);
+                
+                const lookAtTarget = new THREE.Vector3((tx + gx)/2, R, (tz + gz)/2);
+                subCamera.lookAt(lookAtTarget);
+
+                cueLine.geometry.setFromPoints([
+                    new THREE.Vector3(cx, R, cz),
+                    new THREE.Vector3(gx, R, gz)
+                ]);
+            }
+
+            const limitX = PLAY_W / 2 - NOSE_W;
+            const limitZ = PLAY_D / 2 - NOSE_W;
+            let tHit = Infinity;
+
+            if (Math.abs(flyDirX) > 0.0001) {
+                const tX1 = (limitX - tx) / flyDirX;
+                const tX2 = (-limitX - tx) / flyDirX;
+                const tX = Math.max(tX1, tX2); 
+                if (tX > 0 && tX < tHit) tHit = tX;
+            }
+            if (Math.abs(flyDirZ) > 0.0001) {
+                const tZ1 = (limitZ - tz) / flyDirZ;
+                const tZ2 = (-limitZ - tz) / flyDirZ;
+                const tZ = Math.max(tZ1, tZ2);
+                if (tZ > 0 && tZ < tHit) tHit = tZ;
+            }
+            const targetHitX = tx + flyDirX * tHit;
+            const targetHitZ = tz + flyDirZ * tHit;
+
+            targetLine.geometry.setFromPoints([
+                new THREE.Vector3(tx, R, tz),
+                new THREE.Vector3(targetHitX, R, targetHitZ) 
+            ]);
+            targetLine.computeLineDistances();
+
+            let defX = 0;
+            let defZ = 0;
+            let showDeflect = false;
+
+            if (Math.abs(addedTheta) > 0.0001) {
+                const v1X = flyDirZ;
+                const v1Z = -flyDirX;
+                const v2X = -flyDirZ;
+                const v2Z = flyDirX;
+
+                const incX = gx - cx;
+                const incZ = gz - cz;
+
+                const dp1 = incX * v1X + incZ * v1Z;
+                const dp2 = incX * v2X + incZ * v2Z;
+
+                if (dp1 > dp2) {
+                    defX = v1X;
+                    defZ = v1Z;
+                } else {
+                    defX = v2X;
+                    defZ = v2Z;
+                }
+                showDeflect = true;
+            }
+
+            if (showDeflect) {
+                let tDefHit = Infinity;
+                if (Math.abs(defX) > 0.0001) {
+                    const tX1 = (limitX - gx) / defX;
+                    const tX2 = (-limitX - gx) / defX;
+                    const tX = Math.max(tX1, tX2);
+                    if (tX > 0 && tX < tDefHit) tDefHit = tX;
+                }
+                if (Math.abs(defZ) > 0.0001) {
+                    const tZ1 = (limitZ - gz) / defZ;
+                    const tZ2 = (-limitZ - gz) / defZ;
+                    const tZ = Math.max(tZ1, tZ2);
+                    if (tZ > 0 && tZ < tDefHit) tDefHit = tZ;
+                }
+
+                const defHitX = gx + defX * tDefHit;
+                const defHitZ = gz + defZ * tDefHit;
+
+                cueDeflectLine.geometry.setFromPoints([
+                    new THREE.Vector3(gx, R, gz),
+                    new THREE.Vector3(defHitX, R, defHitZ)
+                ]);
+                cueDeflectLine.computeLineDistances(); 
+                cueDeflectLine.visible = true;
+            } else {
+                cueDeflectLine.visible = false;
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            orbitControls.update();
+
+            renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+            renderer.setScissor(0, 0, window.innerWidth, window.innerHeight);
+            renderer.setScissorTest(true);
+            renderer.clear();
+            renderer.render(scene, camera);
+
+            const subSize = Math.min(window.innerWidth, window.innerHeight) * 0.3;
+            const subSizeClamped = Math.min(subSize, 200); 
+            const subX = 20;
+            const subY = 20;
+
+            cueBall.visible = false; 
+
+            renderer.setViewport(subX, subY, subSizeClamped, subSizeClamped);
+            renderer.setScissor(subX, subY, subSizeClamped, subSizeClamped);
+            renderer.setScissorTest(true);
+            renderer.setClearColor(0x282828); 
+            renderer.clear(); 
+            renderer.render(scene, subCamera);
+            
+            cueBall.visible = true; 
+            
+            renderer.setClearColor(0xe0e0e0);
+        }
+
+        angleSlider.addEventListener('input', updateScene);
+        window.addEventListener('resize', () => {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+            
+            subCamera.aspect = 1; 
+            subCamera.updateProjectionMatrix();
+        });
+
+        updateSliderLimits();
+        updateScene();
+        animate();
+    </script>
+</body>
+</html>
